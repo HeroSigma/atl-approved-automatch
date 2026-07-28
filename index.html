@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0b0b0d">
+<link rel="preconnect" href="https://script.google.com">
+<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -773,7 +775,15 @@ let inventory=[],deals=[],representatives=[],rep={},faq=[],processSteps=[],usage
 let browseLimit=12,browseFiltered=[],selectedVehicle=null,selectedAction='Contact First';
 let galleryImages=[],galleryIndex=0,latestPayload=null,latestResponse=null;
 let repSelection={mode:'auto',repId:'',repName:''};
+let repSelectionTouched=false;
 let galleryTouchStartX=0,galleryTouchStartY=0;
+const BOOTSTRAP_CACHE_KEY='automatch.bootstrap.v2';
+const BOOTSTRAP_CACHE_MAX_AGE_MS=24*60*60*1000;
+const coverCache=new Map();
+const coverQueue=new Map();
+let coverQueueTimer=null;
+let coverObserver=null;
+let coverRequestActive=false;
 const finder={step:1,budget:null,vehicleUsage:'',make:'Any',bodyType:'Any',purchaseTimeline:'',notes:'',result:null};
 
 const $=id=>document.getElementById(id);
@@ -881,10 +891,50 @@ if(window.visualViewport){
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(window.__t);window.__t=setTimeout(()=>$('toast').classList.remove('show'),2700)}
 function fail(error){$('startFinder').textContent='Inventory Offline';$('startFinder').disabled=true;$('browseAll').disabled=true;$('connectionBanner').classList.remove('hidden');$('connectionBanner').textContent=error&&error.message?error.message:String(error||'Could not load');toast('Live inventory could not load.')}
 
-apiJsonp('bootstrap').then(init).catch(fail);
+function readBootstrapCache(){
+  try{
+    const cached=JSON.parse(localStorage.getItem(BOOTSTRAP_CACHE_KEY)||'null');
+    if(!cached||!cached.data||!cached.savedAt)return null;
+    if(Date.now()-Number(cached.savedAt)>BOOTSTRAP_CACHE_MAX_AGE_MS)return null;
+    return cached.data;
+  }catch(error){
+    console.warn('AutoMatch cache could not be read.',error);
+    return null;
+  }
+}
+
+function saveBootstrapCache(data){
+  try{
+    localStorage.setItem(BOOTSTRAP_CACHE_KEY,JSON.stringify({savedAt:Date.now(),data}));
+  }catch(error){
+    console.warn('AutoMatch cache could not be saved.',error);
+  }
+}
+
+function startAutoMatch(){
+  const cached=readBootstrapCache();
+  const usedCache=Boolean(cached);
+  if(cached)init(cached,{fromCache:true});
+
+  apiJsonp('bootstrap')
+    .then(data=>{
+      saveBootstrapCache(data);
+      init(data,{fromCache:false});
+    })
+    .catch(error=>{
+      if(!usedCache)fail(error);
+      else{
+        console.error(error);
+        toast('Showing recently saved inventory while the live refresh reconnects.');
+      }
+    });
+}
+
+startAutoMatch();
 
 
 function applyRepresentativeFromLink(){
+  if(repSelectionTouched)return;
   const requestedRepId=(new URLSearchParams(window.location.search).get('rep')||'').trim();
   if(!requestedRepId)return;
   const normalized=requestedRepId.toLowerCase();
@@ -894,7 +944,7 @@ function applyRepresentativeFromLink(){
   rep=matched;
 }
 
-function init(data){
+function init(data,options={}){
   if(!data||!data.ok)return fail('AutoMatch data could not load');
   inventory=data.vehicles||[];deals=data.deals||[];representatives=data.representatives||[];rep=data.representative||representatives[0]||{};
   if(!representatives.length&&rep&&rep.name)representatives=[rep];
@@ -966,6 +1016,7 @@ function renderRepChoices(){
   </button>`).join('');
   $('repChoiceGrid').innerHTML=auto+choices;
   document.querySelectorAll('#repChoiceGrid .rep-choice').forEach(button=>button.onclick=()=>{
+    repSelectionTouched=true;
     if(button.dataset.repMode==='chosen'){
       repSelection={mode:'chosen',repId:button.dataset.repId||'',repName:button.dataset.repName||''};
       $('repChoiceNote').textContent=`Your request will be sent to ${repSelection.repName}.`;
@@ -1003,7 +1054,7 @@ function card(v){
   const image=v.hasImageFolder
     ? `<div class="cover-slot" data-cover-id="${esc(v.id)}"><div class="cover-loading">Loading vehicle image...</div></div>`
     : legacyImage
-      ? `<div class="cover-slot"><img src="${esc(legacyImage)}" alt="${esc(v.year+' '+v.make+' '+v.model)}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=&quot;placeholder&quot;>${esc(v.make)} ${esc(v.model)}</div>'"></div>`
+      ? `<div class="cover-slot"><img src="${esc(legacyImage)}" alt="${esc(v.year+' '+v.make+' '+v.model)}" loading="lazy" decoding="async" onerror="this.parentElement.innerHTML='<div class=&quot;placeholder&quot;>${esc(v.make)} ${esc(v.model)}</div>'"></div>`
       : `<div class="cover-slot"><div class="placeholder">${esc(v.make)} ${esc(v.model)}</div></div>`;
 
   const deal=v.deal&&v.deal.active
@@ -1025,50 +1076,94 @@ function card(v){
   return `<article class="vehicle"><div class="media">${image}<div class="badges">${deal}<span class="badge">${esc(v.bodyType)}</span></div></div><div class="card-body"><div class="vehicle-title">${esc(v.year)} ${esc(v.make)} ${esc(v.model)}</div><div class="vehicle-sub">${esc(v.colour||'Colour to confirm')} · ${number(v.mileage)} km</div><div class="price-row"><span class="price">${money(v.price)}</span>${original}</div>${saving}${over}<div class="tags">${(v.usageTags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div><button class="primary viewVehicle" data-id="${esc(v.id)}">View Vehicle</button></div></article>`;
 }
 
-function hydrateVehicleCovers(container){
-  const slots=Array.from(
-    container.querySelectorAll('[data-cover-id]')
-  );
+function setVehicleCoverSlot(slot,src){
+  const vehicleId=slot.dataset.coverId;
+  const vehicle=inventory.find(item=>item.id===vehicleId);
 
-  const ids=unique(
-    slots.map(slot=>slot.dataset.coverId)
-  );
+  if(src){
+    slot.innerHTML=`<img src="${esc(src)}" alt="${esc(vehicle?vehicle.year+' '+vehicle.make+' '+vehicle.model:'Vehicle')}" loading="lazy" decoding="async">`;
+  }else{
+    slot.innerHTML=`<div class="placeholder">${esc(vehicle?vehicle.make+' '+vehicle.model:'Vehicle Image')}</div>`;
+  }
 
-  if(!ids.length)return;
+  slot.removeAttribute('data-cover-id');
+}
 
-  apiJsonp('covers',{ids:ids.join(',')})
-    .then(response=>{
-      const covers=response&&response.covers
-        ? response.covers
-        : {};
+function queueVehicleCover(slot){
+  const vehicleId=slot.dataset.coverId;
+  if(!vehicleId)return;
 
-      slots.forEach(slot=>{
-        const vehicleId=slot.dataset.coverId;
-        const vehicle=inventory.find(
-          item=>item.id===vehicleId
-        );
-        const src=covers[vehicleId];
+  if(coverCache.has(vehicleId)){
+    setVehicleCoverSlot(slot,coverCache.get(vehicleId));
+    return;
+  }
 
-        if(src){
-          slot.innerHTML=`<img src="${esc(src)}" alt="${esc(vehicle?vehicle.year+' '+vehicle.make+' '+vehicle.model:'Vehicle')}" loading="lazy">`;
-        }else{
-          slot.innerHTML=`<div class="placeholder">${esc(vehicle?vehicle.make+' '+vehicle.model:'Vehicle Image')}</div>`;
-        }
+  if(!coverQueue.has(vehicleId))coverQueue.set(vehicleId,new Set());
+  coverQueue.get(vehicleId).add(slot);
 
-        slot.removeAttribute('data-cover-id');
-      });
-    })
-    .catch(error=>{
-      console.error(error);
+  clearTimeout(coverQueueTimer);
+  coverQueueTimer=setTimeout(flushVehicleCoverQueue,70);
+}
 
-      slots.forEach(slot=>{
-        const vehicle=inventory.find(
-          item=>item.id===slot.dataset.coverId
-        );
+async function flushVehicleCoverQueue(){
+  if(coverRequestActive||!coverQueue.size)return;
+  coverRequestActive=true;
 
-        slot.innerHTML=`<div class="placeholder">${esc(vehicle?vehicle.make+' '+vehicle.model:'Vehicle Image')}</div>`;
-      });
+  const ids=Array.from(coverQueue.keys()).slice(0,8);
+  const slotsById=new Map();
+
+  ids.forEach(id=>{
+    slotsById.set(id,coverQueue.get(id));
+    coverQueue.delete(id);
+  });
+
+  try{
+    const response=await apiJsonp('covers',{ids:ids.join(',')});
+    const covers=response&&response.covers?response.covers:{};
+
+    ids.forEach(id=>{
+      const src=covers[id]||'';
+      coverCache.set(id,src);
+      (slotsById.get(id)||[]).forEach(slot=>setVehicleCoverSlot(slot,src));
     });
+  }catch(error){
+    console.error(error);
+    ids.forEach(id=>{
+      (slotsById.get(id)||[]).forEach(slot=>setVehicleCoverSlot(slot,''));
+    });
+  }finally{
+    coverRequestActive=false;
+    if(coverQueue.size){
+      clearTimeout(coverQueueTimer);
+      coverQueueTimer=setTimeout(flushVehicleCoverQueue,70);
+    }
+  }
+}
+
+function hydrateVehicleCovers(container){
+  const slots=Array.from(container.querySelectorAll('[data-cover-id]'));
+  if(!slots.length)return;
+
+  if(!('IntersectionObserver' in window)){
+    slots.forEach(queueVehicleCover);
+    return;
+  }
+
+  if(!coverObserver){
+    coverObserver=new IntersectionObserver(entries=>{
+      entries.forEach(entry=>{
+        if(!entry.isIntersecting)return;
+        coverObserver.unobserve(entry.target);
+        queueVehicleCover(entry.target);
+      });
+    },{rootMargin:'450px 0px',threshold:0.01});
+  }
+
+  slots.forEach(slot=>{
+    const vehicleId=slot.dataset.coverId;
+    if(coverCache.has(vehicleId))setVehicleCoverSlot(slot,coverCache.get(vehicleId));
+    else coverObserver.observe(slot);
+  });
 }
 
 function bindCards(container){
@@ -1168,9 +1263,9 @@ function renderGallery(){
     ? `${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}`
     : 'Vehicle';
 
-  $('galleryMain').innerHTML=`<img src="${esc(galleryImages[galleryIndex])}" alt="${esc(vehicleName)} image ${galleryIndex+1}">${galleryImages.length>1?'<button class="g-nav prev" id="gPrev" aria-label="Previous image">‹</button><button class="g-nav next" id="gNext" aria-label="Next image">›</button>':''}`;
+  $('galleryMain').innerHTML=`<img src="${esc(galleryImages[galleryIndex])}" alt="${esc(vehicleName)} image ${galleryIndex+1}" decoding="async">${galleryImages.length>1?'<button class="g-nav prev" id="gPrev" aria-label="Previous image">‹</button><button class="g-nav next" id="gNext" aria-label="Next image">›</button>':''}`;
 
-  $('thumbs').innerHTML=galleryImages.map((src,i)=>`<button class="thumb ${i===galleryIndex?'active':''}" data-i="${i}" aria-label="Show image ${i+1}"><img src="${esc(src)}" alt=""></button>`).join('');
+  $('thumbs').innerHTML=galleryImages.map((src,i)=>`<button class="thumb ${i===galleryIndex?'active':''}" data-i="${i}" aria-label="Show image ${i+1}"><img src="${esc(src)}" alt="" loading="lazy" decoding="async"></button>`).join('');
 
   document.querySelectorAll('.thumb').forEach(b=>b.onclick=()=>{
     galleryIndex=Number(b.dataset.i);
