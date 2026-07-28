@@ -883,11 +883,23 @@ function fail(error){$('startFinder').textContent='Inventory Offline';$('startFi
 
 apiJsonp('bootstrap').then(init).catch(fail);
 
+
+function applyRepresentativeFromLink(){
+  const requestedRepId=(new URLSearchParams(window.location.search).get('rep')||'').trim();
+  if(!requestedRepId)return;
+  const normalized=requestedRepId.toLowerCase();
+  const matched=representatives.find(r=>String(r.id||'').trim().toLowerCase()===normalized);
+  if(!matched)return;
+  repSelection={mode:'chosen',repId:String(matched.id||''),repName:matched.name||''};
+  rep=matched;
+}
+
 function init(data){
   if(!data||!data.ok)return fail('AutoMatch data could not load');
   inventory=data.vehicles||[];deals=data.deals||[];representatives=data.representatives||[];rep=data.representative||representatives[0]||{};
   if(!representatives.length&&rep&&rep.name)representatives=[rep];
   faq=data.faq||[];processSteps=data.processSteps||[];usageOptions=data.usageOptions||[];timelineOptions=data.timelineOptions||[];
+  applyRepresentativeFromLink();
   $('stockCount').textContent=inventory.length;$('startFinder').disabled=false;$('browseAll').disabled=false;$('startFinder').textContent='Find My Car';
   renderRep();renderDeals();renderProcess();renderFaq();buildOptions();
   const today=new Date().toISOString().slice(0,10);$('preferredDate').min=today;$('alternativeDate').min=today;
@@ -916,16 +928,26 @@ function repCard(r){
 }
 function renderRep(){
   const available=representatives.length?representatives:[rep];
-  const name=rep.name||'Allan Adair';
-  if(available.length>1){
+  const linkedRep=repSelection.mode==='chosen'
+    ? available.find(r=>String(r.id||'')===String(repSelection.repId||''))
+    : null;
+  const displayRep=linkedRep||rep;
+  const name=displayRep.name||'Allan Adair';
+  if(linkedRep){
+    const meta='Your linked representative · '+(displayRep.availability||'Available');
+    $('miniName').textContent=name;
+    $('miniMeta').textContent=meta;
+    if(displayRep.imageUrl)$('miniAvatar').innerHTML=`<img src="${esc(displayRep.imageUrl)}" alt="${esc(name)}" onerror="this.parentElement.textContent='${esc(initials(name))}'">`;
+    else $('miniAvatar').textContent=initials(name);
+  }else if(available.length>1){
     $('miniAvatar').textContent='ATL';
     $('miniName').textContent='Choose Your Representative';
     $('miniMeta').textContent=`${available.length} representatives available`;
   }else{
-    const meta=(rep.instagram?'@'+rep.instagram:'ATL Approved Pre-Owned')+' · '+(rep.availability||'Available');
+    const meta=(displayRep.instagram?'@'+displayRep.instagram:'ATL Approved Pre-Owned')+' · '+(displayRep.availability||'Available');
     $('miniName').textContent=name;
     $('miniMeta').textContent=meta;
-    if(rep.imageUrl)$('miniAvatar').innerHTML=`<img src="${esc(rep.imageUrl)}" alt="${esc(name)}" onerror="this.parentElement.textContent='${esc(initials(name))}'">`;
+    if(displayRep.imageUrl)$('miniAvatar').innerHTML=`<img src="${esc(displayRep.imageUrl)}" alt="${esc(name)}" onerror="this.parentElement.textContent='${esc(initials(name))}'">`;
     else $('miniAvatar').textContent=initials(name);
   }
   $('repDirectory').innerHTML=available.length?available.map(repCard).join(''):'<div class="empty">No representatives are currently marked available.</div>';
