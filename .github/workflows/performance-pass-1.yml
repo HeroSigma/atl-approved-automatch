@@ -24,45 +24,7 @@ jobs:
 
           files=[Path('index.html'),Path('404.html')]
 
-          for path in files:
-            text=path.read_text(encoding='utf-8')
-
-            if 'rel="preconnect" href="https://script.google.com"' not in text:
-              text=text.replace(
-                '<meta name="theme-color" content="#0b0b0d">',
-                '<meta name="theme-color" content="#0b0b0d">\n<link rel="preconnect" href="https://script.google.com">\n<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>',
-                1
-              )
-
-            old_vars="""let galleryImages=[],galleryIndex=0,latestPayload=null,latestResponse=null;
-          let repSelection={mode:'auto',repId:'',repName:''};
-          let galleryTouchStartX=0,galleryTouchStartY=0;
-          const finder={step:1,budget:null,vehicleUsage:'',make:'Any',bodyType:'Any',purchaseTimeline:'',notes:'',result:null};"""
-
-            new_vars="""let galleryImages=[],galleryIndex=0,latestPayload=null,latestResponse=null;
-          let repSelection={mode:'auto',repId:'',repName:''};
-          let repSelectionTouched=false;
-          let galleryTouchStartX=0,galleryTouchStartY=0;
-          const BOOTSTRAP_CACHE_KEY='automatch.bootstrap.v2';
-          const BOOTSTRAP_CACHE_MAX_AGE_MS=24*60*60*1000;
-          const coverCache=new Map();
-          const coverQueue=new Map();
-          let coverQueueTimer=null;
-          let coverObserver=null;
-          let coverRequestActive=false;
-          const finder={step:1,budget:null,vehicleUsage:'',make:'Any',bodyType:'Any',purchaseTimeline:'',notes:'',result:null};"""
-
-            if old_vars in text:
-              text=text.replace(old_vars,new_vars,1)
-            elif "BOOTSTRAP_CACHE_KEY='automatch.bootstrap.v2'" not in text:
-              raise SystemExit(f'variable anchor missing in {path}')
-
-            old_boot="""apiJsonp('bootstrap').then(init).catch(fail);
-
-
-          function applyRepresentativeFromLink(){"""
-
-            new_boot="""function readBootstrapCache(){
+          cache_block="""function readBootstrapCache(){
             try{
               const cached=JSON.parse(localStorage.getItem(BOOTSTRAP_CACHE_KEY)||'null');
               if(!cached||!cached.data||!cached.savedAt)return null;
@@ -106,34 +68,7 @@ jobs:
 
           function applyRepresentativeFromLink(){"""
 
-            if old_boot in text:
-              text=text.replace(old_boot,new_boot,1)
-            elif 'function readBootstrapCache()' not in text:
-              raise SystemExit(f'bootstrap anchor missing in {path}')
-
-            text=text.replace(
-              "function applyRepresentativeFromLink(){\n  const requestedRepId=",
-              "function applyRepresentativeFromLink(){\n  if(repSelectionTouched)return;\n  const requestedRepId=",
-              1
-            )
-
-            text=text.replace(
-              'function init(data){',
-              'function init(data,options={}){',
-              1
-            )
-
-            old_click="""document.querySelectorAll('#repChoiceGrid .rep-choice').forEach(button=>button.onclick=()=>{
-            if(button.dataset.repMode==='chosen'){"""
-            new_click="""document.querySelectorAll('#repChoiceGrid .rep-choice').forEach(button=>button.onclick=()=>{
-            repSelectionTouched=true;
-            if(button.dataset.repMode==='chosen'){"""
-            if old_click in text:
-              text=text.replace(old_click,new_click,1)
-            elif 'repSelectionTouched=true;' not in text:
-              raise SystemExit(f'rep choice anchor missing in {path}')
-
-            lazy_code=r'''function setVehicleCoverSlot(slot,src){
+          lazy_code=r'''function setVehicleCoverSlot(slot,src){
             const vehicleId=slot.dataset.coverId;
             const vehicle=inventory.find(item=>item.id===vehicleId);
 
@@ -225,13 +160,49 @@ jobs:
 
           '''
 
-            pattern=r"function hydrateVehicleCovers\(container\)\{.*?\n\}\n\nfunction bindCards\(container\)\{"
-            replacement=lazy_code+"function bindCards(container){"
-            updated,count=re.subn(pattern,replacement,text,count=1,flags=re.S)
-            if count==1:
-              text=updated
-            elif 'function queueVehicleCover(slot)' not in text:
-              raise SystemExit(f'cover loader block missing in {path}')
+          for path in files:
+            text=path.read_text(encoding='utf-8')
+
+            if 'rel="preconnect" href="https://script.google.com"' not in text:
+              text=text.replace(
+                '<meta name="theme-color" content="#0b0b0d">',
+                '<meta name="theme-color" content="#0b0b0d">\n<link rel="preconnect" href="https://script.google.com">\n<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>',
+                1
+              )
+
+            if "BOOTSTRAP_CACHE_KEY='automatch.bootstrap.v2'" not in text:
+              text=text.replace(
+                "let repSelection={mode:'auto',repId:'',repName:''};\nlet galleryTouchStartX=0,galleryTouchStartY=0;",
+                "let repSelection={mode:'auto',repId:'',repName:''};\nlet repSelectionTouched=false;\nlet galleryTouchStartX=0,galleryTouchStartY=0;\nconst BOOTSTRAP_CACHE_KEY='automatch.bootstrap.v2';\nconst BOOTSTRAP_CACHE_MAX_AGE_MS=24*60*60*1000;\nconst coverCache=new Map();\nconst coverQueue=new Map();\nlet coverQueueTimer=null;\nlet coverObserver=null;\nlet coverRequestActive=false;",
+                1
+              )
+
+            if 'function readBootstrapCache()' not in text:
+              pattern=r"apiJsonp\('bootstrap'\)\.then\(init\)\.catch\(fail\);\s*\n\s*function applyRepresentativeFromLink\(\)\{"
+              text,count=re.subn(pattern,cache_block,text,count=1)
+              if count!=1:
+                raise SystemExit(f'bootstrap anchor missing in {path}')
+
+            if 'if(repSelectionTouched)return;' not in text:
+              text=text.replace(
+                "function applyRepresentativeFromLink(){\n  const requestedRepId=",
+                "function applyRepresentativeFromLink(){\n  if(repSelectionTouched)return;\n  const requestedRepId=",
+                1
+              )
+
+            text=text.replace('function init(data){','function init(data,options={}){',1)
+
+            if 'repSelectionTouched=true;' not in text:
+              anchor="document.querySelectorAll('#repChoiceGrid .rep-choice').forEach(button=>button.onclick=()=>{"
+              if anchor not in text:
+                raise SystemExit(f'rep choice anchor missing in {path}')
+              text=text.replace(anchor,anchor+"\n    repSelectionTouched=true;",1)
+
+            if 'function queueVehicleCover(slot)' not in text:
+              pattern=r"function hydrateVehicleCovers\(container\)\{.*?\n\}\n\nfunction bindCards\(container\)\{"
+              text,count=re.subn(pattern,lazy_code+'function bindCards(container){',text,count=1,flags=re.S)
+              if count!=1:
+                raise SystemExit(f'cover loader block missing in {path}')
 
             text=text.replace('loading="lazy" onerror=', 'loading="lazy" decoding="async" onerror=')
             text=text.replace(
@@ -262,7 +233,7 @@ jobs:
           node --check /tmp/index.html.js
           node --check /tmp/404.html.js
           grep -q "function readBootstrapCache" index.html
-          grep -q "IntersectionObserver" index.html
+          grep -q "function queueVehicleCover" index.html
           grep -q "rootMargin:'450px 0px'" index.html
 
       - name: Commit optimization
