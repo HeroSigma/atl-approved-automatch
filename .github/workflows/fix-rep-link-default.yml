@@ -2,91 +2,93 @@ name: Fix representative link defaults
 
 on:
   push:
-    paths:
-      - ".github/workflows/fix-rep-link-default.yml"
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   patch:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Patch rep-specific link handling
-        shell: python
+        shell: bash
         run: |
+          python <<'PY'
           from pathlib import Path
 
           files = [Path("index.html"), Path("404.html")]
 
           helper = r'''
-function applyRepresentativeFromLink(){
-  const requestedRepId=(new URLSearchParams(window.location.search).get('rep')||'').trim();
-  if(!requestedRepId)return;
-  const normalized=requestedRepId.toLowerCase();
-  const matched=representatives.find(r=>String(r.id||'').trim().toLowerCase()===normalized);
-  if(!matched)return;
-  repSelection={mode:'chosen',repId:String(matched.id||''),repName:matched.name||''};
-  rep=matched;
-}
-'''
+          function applyRepresentativeFromLink(){
+            const requestedRepId=(new URLSearchParams(window.location.search).get('rep')||'').trim();
+            if(!requestedRepId)return;
+            const normalized=requestedRepId.toLowerCase();
+            const matched=representatives.find(r=>String(r.id||'').trim().toLowerCase()===normalized);
+            if(!matched)return;
+            repSelection={mode:'chosen',repId:String(matched.id||''),repName:matched.name||''};
+            rep=matched;
+          }
+          '''
 
           old_init = """  faq=data.faq||[];processSteps=data.processSteps||[];usageOptions=data.usageOptions||[];timelineOptions=data.timelineOptions||[];
-  $('stockCount').textContent=inventory.length;$('startFinder').disabled=false;$('browseAll').disabled=false;$('startFinder').textContent='Find My Car';
-  renderRep();renderDeals();renderProcess();renderFaq();buildOptions();"""
+            $('stockCount').textContent=inventory.length;$('startFinder').disabled=false;$('browseAll').disabled=false;$('startFinder').textContent='Find My Car';
+            renderRep();renderDeals();renderProcess();renderFaq();buildOptions();"""
 
           new_init = """  faq=data.faq||[];processSteps=data.processSteps||[];usageOptions=data.usageOptions||[];timelineOptions=data.timelineOptions||[];
-  applyRepresentativeFromLink();
-  $('stockCount').textContent=inventory.length;$('startFinder').disabled=false;$('browseAll').disabled=false;$('startFinder').textContent='Find My Car';
-  renderRep();renderDeals();renderProcess();renderFaq();buildOptions();"""
+            applyRepresentativeFromLink();
+            $('stockCount').textContent=inventory.length;$('startFinder').disabled=false;$('browseAll').disabled=false;$('startFinder').textContent='Find My Car';
+            renderRep();renderDeals();renderProcess();renderFaq();buildOptions();"""
 
           old_render = """function renderRep(){
-  const available=representatives.length?representatives:[rep];
-  const name=rep.name||'Allan Adair';
-  if(available.length>1){
-    $('miniAvatar').textContent='ATL';
-    $('miniName').textContent='Choose Your Representative';
-    $('miniMeta').textContent=`${available.length} representatives available`;
-  }else{
-    const meta=(rep.instagram?'@'+rep.instagram:'ATL Approved Pre-Owned')+' · '+(rep.availability||'Available');
-    $('miniName').textContent=name;
-    $('miniMeta').textContent=meta;
-    if(rep.imageUrl)$('miniAvatar').innerHTML=`<img src="${esc(rep.imageUrl)}" alt="${esc(name)}" onerror="this.parentElement.textContent='${esc(initials(name))}'">`;
-    else $('miniAvatar').textContent=initials(name);
-  }
-  $('repDirectory').innerHTML=available.length?available.map(repCard).join(''):'<div class="empty">No representatives are currently marked available.</div>';
-  renderRepChoices();
-}"""
+            const available=representatives.length?representatives:[rep];
+            const name=rep.name||'Allan Adair';
+            if(available.length>1){
+              $('miniAvatar').textContent='ATL';
+              $('miniName').textContent='Choose Your Representative';
+              $('miniMeta').textContent=`${available.length} representatives available`;
+            }else{
+              const meta=(rep.instagram?'@'+rep.instagram:'ATL Approved Pre-Owned')+' · '+(rep.availability||'Available');
+              $('miniName').textContent=name;
+              $('miniMeta').textContent=meta;
+              if(rep.imageUrl)$('miniAvatar').innerHTML=`<img src="${esc(rep.imageUrl)}" alt="${esc(name)}" onerror="this.parentElement.textContent='${esc(initials(name))}'">`;
+              else $('miniAvatar').textContent=initials(name);
+            }
+            $('repDirectory').innerHTML=available.length?available.map(repCard).join(''):'<div class="empty">No representatives are currently marked available.</div>';
+            renderRepChoices();
+          }"""
 
           new_render = """function renderRep(){
-  const available=representatives.length?representatives:[rep];
-  const linkedRep=repSelection.mode==='chosen'
-    ? available.find(r=>String(r.id||'')===String(repSelection.repId||''))
-    : null;
-  const displayRep=linkedRep||rep;
-  const name=displayRep.name||'Allan Adair';
-  if(linkedRep){
-    const meta='Your linked representative · '+(displayRep.availability||'Available');
-    $('miniName').textContent=name;
-    $('miniMeta').textContent=meta;
-    if(displayRep.imageUrl)$('miniAvatar').innerHTML=`<img src="${esc(displayRep.imageUrl)}" alt="${esc(name)}" onerror="this.parentElement.textContent='${esc(initials(name))}'">`;
-    else $('miniAvatar').textContent=initials(name);
-  }else if(available.length>1){
-    $('miniAvatar').textContent='ATL';
-    $('miniName').textContent='Choose Your Representative';
-    $('miniMeta').textContent=`${available.length} representatives available`;
-  }else{
-    const meta=(displayRep.instagram?'@'+displayRep.instagram:'ATL Approved Pre-Owned')+' · '+(displayRep.availability||'Available');
-    $('miniName').textContent=name;
-    $('miniMeta').textContent=meta;
-    if(displayRep.imageUrl)$('miniAvatar').innerHTML=`<img src="${esc(displayRep.imageUrl)}" alt="${esc(name)}" onerror="this.parentElement.textContent='${esc(initials(name))}'">`;
-    else $('miniAvatar').textContent=initials(name);
-  }
-  $('repDirectory').innerHTML=available.length?available.map(repCard).join(''):'<div class="empty">No representatives are currently marked available.</div>';
-  renderRepChoices();
-}"""
+            const available=representatives.length?representatives:[rep];
+            const linkedRep=repSelection.mode==='chosen'
+              ? available.find(r=>String(r.id||'')===String(repSelection.repId||''))
+              : null;
+            const displayRep=linkedRep||rep;
+            const name=displayRep.name||'Allan Adair';
+            if(linkedRep){
+              const meta='Your linked representative · '+(displayRep.availability||'Available');
+              $('miniName').textContent=name;
+              $('miniMeta').textContent=meta;
+              if(displayRep.imageUrl)$('miniAvatar').innerHTML=`<img src="${esc(displayRep.imageUrl)}" alt="${esc(name)}" onerror="this.parentElement.textContent='${esc(initials(name))}'">`;
+              else $('miniAvatar').textContent=initials(name);
+            }else if(available.length>1){
+              $('miniAvatar').textContent='ATL';
+              $('miniName').textContent='Choose Your Representative';
+              $('miniMeta').textContent=`${available.length} representatives available`;
+            }else{
+              const meta=(displayRep.instagram?'@'+displayRep.instagram:'ATL Approved Pre-Owned')+' · '+(displayRep.availability||'Available');
+              $('miniName').textContent=name;
+              $('miniMeta').textContent=meta;
+              if(displayRep.imageUrl)$('miniAvatar').innerHTML=`<img src="${esc(displayRep.imageUrl)}" alt="${esc(name)}" onerror="this.parentElement.textContent='${esc(initials(name))}'">`;
+              else $('miniAvatar').textContent=initials(name);
+            }
+            $('repDirectory').innerHTML=available.length?available.map(repCard).join(''):'<div class="empty">No representatives are currently marked available.</div>';
+            renderRepChoices();
+          }"""
 
           for path in files:
             text = path.read_text(encoding="utf-8")
@@ -108,6 +110,7 @@ function applyRepresentativeFromLink(){
               raise SystemExit(f"renderRep block did not match in {path}")
 
             path.write_text(text, encoding="utf-8")
+          PY
 
       - name: Verify patch
         shell: bash
@@ -121,8 +124,9 @@ function applyRepresentativeFromLink(){
         shell: bash
         run: |
           rm -f .github/workflows/fix-rep-link-default.yml
+          rm -f .rep-link-trigger
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add index.html 404.html .github/workflows/fix-rep-link-default.yml
+          git add -A
           git commit -m "Default AutoMatch to representative from shared link"
           git push
