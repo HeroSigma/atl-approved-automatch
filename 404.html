@@ -784,6 +784,7 @@ const coverQueue=new Map();
 let coverQueueTimer=null;
 let coverObserver=null;
 let coverRequestActive=false;
+const VEHICLE_COVER_WIDTH=window.innerWidth<768?420:window.innerWidth<1024?560:640;
 const finder={step:1,budget:null,vehicleUsage:'',make:'Any',bodyType:'Any',purchaseTimeline:'',notes:'',result:null};
 
 const $=id=>document.getElementById(id);
@@ -1118,7 +1119,7 @@ async function flushVehicleCoverQueue(){
   });
 
   try{
-    const response=await apiJsonp('covers',{ids:ids.join(',')});
+    const response=await apiJsonp('covers',{ids:ids.join(','),width:VEHICLE_COVER_WIDTH});
     const covers=response&&response.covers?response.covers:{};
 
     ids.forEach(id=>{
